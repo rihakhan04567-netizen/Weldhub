@@ -33,6 +33,3 @@ workflows:
       email:
         recipients:
           - khaaansaifi0@gmail.com
-        notify:
-          on_success: true
-          on_failure: true
