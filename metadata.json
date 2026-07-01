@@ -1,0 +1,6 @@
+{
+  "name": "WeldHub",
+  "description": "Premium steel fabrication marketplace, design gallery, booking, and AI cost estimator in India.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
