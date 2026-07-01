@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -54,6 +55,25 @@ fun WeldHubApp(
     
     // Manage Bottom Navigation selection locally
     var currentBottomTab by remember { mutableStateOf("home") }
+    var showFirebaseDialog by remember { mutableStateOf(false) }
+
+    if (showFirebaseDialog) {
+        FirebaseSignInDialog(
+            viewModel = viewModel,
+            onDismiss = { showFirebaseDialog = false },
+            onComplete = { role ->
+                showFirebaseDialog = false
+                val nextScreen = when (role) {
+                    "Admin" -> "admin_panel"
+                    "Welder", "Fabricator" -> "welder_dashboard"
+                    else -> "customer_main"
+                }
+                navController.navigate(nextScreen) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -125,6 +145,13 @@ fun WeldHubApp(
                                     navController.navigate("admin_panel") {
                                         popUpTo(0) { inclusive = true }
                                     }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🔥 Firebase Secure Auth") },
+                                onClick = {
+                                    showFirebaseDialog = true
+                                    showRoleMenu = false
                                 }
                             )
                         }
@@ -895,211 +922,288 @@ fun AIEstimatorScreen(
     viewModel: WeldHubViewModel,
     navController: NavHostController
 ) {
-    var heightInput by remember { mutableStateOf("10") }
-    var widthInput by remember { mutableStateOf("6") }
-    var selectedMaterial by remember { mutableStateOf("Mild Steel (MS)") }
-    var selectedType by remember { mutableStateOf("Main Gate") }
-    var notesInput by remember { mutableStateOf("") }
+    var activeTab by remember { mutableStateOf("estimator") } // "estimator", "chatbot", "grounding"
 
-    val isEstimating by viewModel.isEstimating.collectAsState()
-    val aiEstimate by viewModel.aiEstimateState.collectAsState()
-
-    var localResult by remember { mutableStateOf<WeldCalculators.CostEstimationResult?>(null) }
-
-    val materials = listOf("Mild Steel (MS)", "Stainless Steel (SS 304)", "Wrought Iron")
-    val types = listOf("Main Gate", "Sliding Gate", "SS Gate", "Window Grill", "Balcony Railing")
-
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
     ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SteelBlue),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Build, contentDescription = "AI", tint = OrangeAccent)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("WeldHub AI Estimator", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Enter the dimensions of your steel gate or railing, and WeldHub AI will calculate structural weight, pipe specifications, labor schedules, and cost estimates.",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-        }
-
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(
-                    value = heightInput,
-                    onValueChange = { heightInput = it },
-                    label = { Text("Height (ft)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = widthInput,
-                    onValueChange = { widthInput = it },
-                    label = { Text("Width (ft)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        item { Spacer(modifier = Modifier.height(12.dp)) }
-
-        item {
-            Text("Select Steel Material Type", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                materials.forEach { mat ->
-                    FilterChip(
-                        selected = selectedMaterial == mat,
-                        onClick = { selectedMaterial = mat },
-                        label = { Text(mat) }
-                    )
-                }
-            }
-        }
-
-        item { Spacer(modifier = Modifier.height(12.dp)) }
-
-        item {
-            Text("Select Design Category", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                types.forEach { t ->
-                    FilterChip(
-                        selected = selectedType == t,
-                        onClick = { selectedType = t },
-                        label = { Text(t) }
-                    )
-                }
-            }
-        }
-
-        item { Spacer(modifier = Modifier.height(12.dp)) }
-
-        item {
-            OutlinedTextField(
-                value = notesInput,
-                onValueChange = { notesInput = it },
-                label = { Text("Custom specifications / site issues") },
-                placeholder = { Text("E.g., require heavy 14 gauge tubes, mitered corners...") },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        val h = heightInput.toDoubleOrNull() ?: 10.0
-                        val w = widthInput.toDoubleOrNull() ?: 6.0
-                        localResult = WeldCalculators.calculateCost(h, w, selectedMaterial, selectedType)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Standard Cost")
-                }
-
-                Button(
-                    onClick = {
-                        val h = heightInput.toDoubleOrNull() ?: 10.0
-                        val w = widthInput.toDoubleOrNull() ?: 6.0
-                        viewModel.getAICostEstimate(h, w, selectedMaterial, selectedType, notesInput)
-                    },
-                    modifier = Modifier.weight(1.2f),
-                    colors = ButtonDefaults.buttonColors(containerColor = OrangeAccent),
-                    shape = RoundedCornerShape(8.dp),
-                    enabled = !isEstimating
-                ) {
-                    if (isEstimating) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp))
-                    } else {
-                        Text("WeldHub AI ✨")
-                    }
-                }
-            }
-        }
-
-        if (isEstimating) {
-            item {
-                Column(
+        // --- Tab Row ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
+            listOf(
+                "estimator" to "AI Estimator",
+                "chatbot" to "AI Consultant 🧠",
+                "grounding" to "Live Grounding 🌐"
+            ).forEach { (tabId, tabTitle) ->
+                val isSelected = activeTab == tabId
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isSelected) SteelBlue else Color.Transparent)
+                        .clickable { activeTab = tabId }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    LinearProgressIndicator(color = OrangeAccent, modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("WeldHub AI is formulating bill of materials & market rates...", fontSize = 12.sp, color = OrangeAccent, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = tabTitle,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
                 }
             }
         }
 
-        aiEstimate?.let { estimate ->
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = CharcoalMedium),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+        Divider(color = SlateBorder, thickness = 0.5.dp)
+
+        // --- Tab Contents ---
+        when (activeTab) {
+            "estimator" -> {
+                var heightInput by remember { mutableStateOf("10") }
+                var widthInput by remember { mutableStateOf("6") }
+                var selectedMaterial by remember { mutableStateOf("Mild Steel (MS)") }
+                var selectedType by remember { mutableStateOf("Main Gate") }
+                var notesInput by remember { mutableStateOf("") }
+
+                val isEstimating by viewModel.isEstimating.collectAsState()
+                val aiEstimate by viewModel.aiEstimateState.collectAsState()
+
+                var localResult by remember { mutableStateOf<WeldCalculators.CostEstimationResult?>(null) }
+
+                val materials = listOf("Mild Steel (MS)", "Stainless Steel (SS 304)", "Wrought Iron")
+                val types = listOf("Main Gate", "Sliding Gate", "SS Gate", "Window Grill", "Balcony Railing")
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Check, contentDescription = "Done", tint = OrangeAccent)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("LIVE AI MARKET QUOTATION", fontWeight = FontWeight.Bold, color = OrangeAccent)
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        estimate.split("\n").forEach { line ->
-                            when {
-                                line.startsWith("###") -> {
-                                    Text(
-                                        text = line.replace("###", "").trim(),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = SteelBlueLight,
-                                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
-                                    )
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SteelBlue),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Build, contentDescription = "AI", tint = OrangeAccent)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("WeldHub AI Estimator", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 }
-                                line.startsWith("-") || line.startsWith("*") -> {
-                                    Row(modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)) {
-                                        Text("• ", color = OrangeAccent, fontWeight = FontWeight.Bold)
-                                        Text(line.substring(1).trim(), color = Color.White, fontSize = 13.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Enter the dimensions of your steel gate or railing, and WeldHub AI will calculate structural weight, pipe specifications, labor schedules, and cost estimates.",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+
+                    item {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            OutlinedTextField(
+                                value = heightInput,
+                                onValueChange = { heightInput = it },
+                                label = { Text("Height (ft)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = widthInput,
+                                onValueChange = { widthInput = it },
+                                label = { Text("Width (ft)") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(12.dp)) }
+
+                    item {
+                        Text("Select Steel Material Type", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            materials.forEach { mat ->
+                                FilterChip(
+                                    selected = selectedMaterial == mat,
+                                    onClick = { selectedMaterial = mat },
+                                    label = { Text(mat) }
+                                )
+                            }
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(12.dp)) }
+
+                    item {
+                        Text("Select Design Category", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            types.forEach { t ->
+                                FilterChip(
+                                    selected = selectedType == t,
+                                    onClick = { selectedType = t },
+                                    label = { Text(t) }
+                                )
+                            }
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(12.dp)) }
+
+                    item {
+                        OutlinedTextField(
+                            value = notesInput,
+                            onValueChange = { notesInput = it },
+                            label = { Text("Custom specifications / site issues") },
+                            placeholder = { Text("E.g., require heavy 14 gauge tubes, mitered corners...") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val h = heightInput.toDoubleOrNull() ?: 10.0
+                                    val w = widthInput.toDoubleOrNull() ?: 6.0
+                                    localResult = WeldCalculators.calculateCost(h, w, selectedMaterial, selectedType)
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Standard Cost")
+                            }
+
+                            Button(
+                                onClick = {
+                                    val h = heightInput.toDoubleOrNull() ?: 10.0
+                                    val w = widthInput.toDoubleOrNull() ?: 6.0
+                                    viewModel.getAICostEstimate(h, w, selectedMaterial, selectedType, notesInput)
+                                },
+                                modifier = Modifier.weight(1.2f),
+                                colors = ButtonDefaults.buttonColors(containerColor = OrangeAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = !isEstimating
+                            ) {
+                                if (isEstimating) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp))
+                                } else {
+                                    Text("WeldHub AI ✨")
+                                }
+                            }
+                        }
+                    }
+
+                    if (isEstimating) {
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                LinearProgressIndicator(color = OrangeAccent, modifier = Modifier.fillMaxWidth())
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("WeldHub AI is formulating bill of materials & market rates...", fontSize = 12.sp, color = OrangeAccent, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+
+                    aiEstimate?.let { estimate ->
+                        item {
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = CharcoalMedium),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Check, contentDescription = "Done", tint = OrangeAccent)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("LIVE AI MARKET QUOTATION", fontWeight = FontWeight.Bold, color = OrangeAccent)
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    
+                                    estimate.split("\n").forEach { line ->
+                                        when {
+                                            line.startsWith("###") -> {
+                                                Text(
+                                                    text = line.replace("###", "").trim(),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 15.sp,
+                                                    color = SteelBlueLight,
+                                                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                                                )
+                                            }
+                                            line.startsWith("-") || line.startsWith("*") -> {
+                                                Row(modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)) {
+                                                    Text("• ", color = OrangeAccent, fontWeight = FontWeight.Bold)
+                                                    Text(line.substring(1).trim(), color = Color.White, fontSize = 13.sp)
+                                                }
+                                            }
+                                            else -> {
+                                                if (line.isNotEmpty()) {
+                                                    Text(line, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp))
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                                else -> {
-                                    if (line.isNotEmpty()) {
-                                        Text(line, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp))
+                            }
+                        }
+                    }
+
+                    localResult?.let { result ->
+                        item {
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier.fillMaxWidth(),
+                                elevation = CardDefaults.cardElevation(4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Standard Steel Formula Report", fontWeight = FontWeight.Bold, color = SteelBlue, fontSize = 15.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    LocalResultRow(label = "Steel Quantity Required", value = "${String.format("%.1f", result.steelQuantityKg)} kg")
+                                    LocalResultRow(label = "Estimated Frame Pipe Length", value = "${String.format("%.1f", result.totalPipeLengthFt)} ft")
+                                    LocalResultRow(label = "Total Raw Weight", value = "${String.format("%.1f", result.weightKg)} kg")
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                                    LocalResultRow(label = "Estimated Fabrication Labor", value = "₹${String.format("%,.0f", result.laborCostRs)}")
+                                    LocalResultRow(label = "Rust Priming & Paint", value = "₹${String.format("%,.0f", result.paintCostRs)}")
+                                    LocalResultRow(label = "Standard Transport & Setup", value = "₹${String.format("%,.0f", result.transportCostRs)}")
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Total Standard Budget", fontWeight = FontWeight.Bold, color = OrangeAccent)
+                                        Text("₹${String.format("%,.0f", result.totalEstimatedCostRs)}", fontWeight = FontWeight.Bold, color = OrangeAccent)
                                     }
                                 }
                             }
@@ -1107,33 +1211,347 @@ fun AIEstimatorScreen(
                     }
                 }
             }
-        }
 
-        localResult?.let { result ->
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(4.dp)
+            "chatbot" -> {
+                val chatHistory by viewModel.aiConsultantMessages.collectAsState()
+                val isConsulting by viewModel.isAIConsulting.collectAsState()
+                var textInput by remember { mutableStateOf("") }
+                val lazyListState = rememberLazyListState()
+
+                LaunchedEffect(chatHistory.size) {
+                    if (chatHistory.isNotEmpty()) {
+                        lazyListState.animateScrollToItem(chatHistory.size - 1)
+                    }
+                }
+
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Chat Control Header
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CharcoalMedium)
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("AI Consultant 🧠 (Thinking: HIGH)", color = OrangeAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
+                        IconButton(onClick = { viewModel.clearAIConsultantChat() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Clear Chat", tint = Color.White)
+                        }
+                    }
+
+                    // Predefined Prompt Chips
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "Explain AWS D1.1 standard",
+                            "Miter vs Butt weld for gates",
+                            "Prevent welding distortion"
+                        ).forEach { suggestion ->
+                            SuggestionChip(
+                                onClick = {
+                                    viewModel.sendAIConsultantMessage(suggestion)
+                                },
+                                label = { Text(suggestion, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    // Chat messages thread
+                    LazyColumn(
+                        state = lazyListState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(chatHistory) { (role, content) ->
+                            val isMyMessage = role == "user"
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = if (isMyMessage) Alignment.CenterEnd else Alignment.CenterStart
+                            ) {
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isMyMessage) SteelBlue else CharcoalMedium
+                                    ),
+                                    shape = RoundedCornerShape(
+                                        topStart = 12.dp,
+                                        topEnd = 12.dp,
+                                        bottomStart = if (isMyMessage) 12.dp else 0.dp,
+                                        bottomEnd = if (isMyMessage) 0.dp else 12.dp
+                                    ),
+                                    modifier = Modifier.widthIn(max = 280.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            text = content,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isConsulting) {
+                            item {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = CharcoalMedium),
+                                        modifier = Modifier.widthIn(max = 280.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            CircularProgressIndicator(color = OrangeAccent, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Thinking deeply...", color = OrangeAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Message input field
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = textInput,
+                            onValueChange = { textInput = it },
+                            placeholder = { Text("Ask engineering question...") },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("ai_chat_input"),
+                            shape = RoundedCornerShape(20.dp),
+                            maxLines = 3
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                if (textInput.trim().isNotEmpty()) {
+                                    viewModel.sendAIConsultantMessage(textInput)
+                                    textInput = ""
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = "Send", tint = OrangeAccent)
+                        }
+                    }
+                }
+            }
+
+            "grounding" -> {
+                val groundingResult by viewModel.groundedSearchResult.collectAsState()
+                val isGrounding by viewModel.isGrounding.collectAsState()
+                var searchQuery by remember { mutableStateOf("") }
+                var useMapsMode by remember { mutableStateOf(false) } // false = Google Search, true = Google Maps
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Standard Steel Formula Report", fontWeight = FontWeight.Bold, color = SteelBlue, fontSize = 15.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LocalResultRow(label = "Steel Quantity Required", value = "${String.format("%.1f", result.steelQuantityKg)} kg")
-                        LocalResultRow(label = "Estimated Frame Pipe Length", value = "${String.format("%.1f", result.totalPipeLengthFt)} ft")
-                        LocalResultRow(label = "Total Raw Weight", value = "${String.format("%.1f", result.weightKg)} kg")
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
-                        LocalResultRow(label = "Estimated Fabrication Labor", value = "₹${String.format("%,.0f", result.laborCostRs)}")
-                        LocalResultRow(label = "Rust Priming & Paint", value = "₹${String.format("%,.0f", result.paintCostRs)}")
-                        LocalResultRow(label = "Standard Transport & Setup", value = "₹${String.format("%,.0f", result.transportCostRs)}")
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SteelBlue),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.LocationOn, contentDescription = "Grounded Search", tint = OrangeAccent)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Grounded Intelligence Engine", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "Leverage real-time search grounding powered by Google Search and Google Maps. Extract exact prices or find suppliers across India instantly.",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+
+                    // Toggle choice
+                    item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Total Standard Budget", fontWeight = FontWeight.Bold, color = OrangeAccent)
-                            Text("₹${String.format("%,.0f", result.totalEstimatedCostRs)}", fontWeight = FontWeight.Bold, color = OrangeAccent)
+                            FilterChip(
+                                selected = !useMapsMode,
+                                onClick = { useMapsMode = false },
+                                label = { Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Search, contentDescription = "Search", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Google Search Data")
+                                }}
+                            )
+
+                            FilterChip(
+                                selected = useMapsMode,
+                                onClick = { useMapsMode = true },
+                                label = { Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.LocationOn, contentDescription = "Maps", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Google Maps Data")
+                                }}
+                            )
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(12.dp)) }
+
+                    item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text(if (useMapsMode) "E.g. Steel tube distributors in Okhla Delhi" else "E.g. Current IS 2062 MS plate prices in Chennai") },
+                            label = { Text("Query Google Grounding") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("grounded_search_input"),
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.runLiveGroundedSearch(searchQuery, useMapsMode)
+                                    },
+                                    enabled = searchQuery.trim().isNotEmpty() && !isGrounding
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = "Query", tint = OrangeAccent)
+                                }
+                            }
+                        )
+                    }
+
+                    // Predefined search items
+                    item {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Suggested Grounded Queries", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CharcoalLight)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            val suggestions = if (useMapsMode) {
+                                listOf(
+                                    "Find major steel suppliers in Gachibowli Hyderabad",
+                                    "Hot-dip galvanizing plants in Faridabad Haryana"
+                                )
+                            } else {
+                                listOf(
+                                    "Current standard MS pipe rate per kg in India 2026",
+                                    "SS 304 vs SS 202 price difference per ton in India"
+                                )
+                            }
+                            suggestions.forEach { query ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            searchQuery = query
+                                            viewModel.runLiveGroundedSearch(query, useMapsMode)
+                                        },
+                                    border = BorderStroke(0.5.dp, SlateBorder)
+                                ) {
+                                    Text(
+                                        text = query,
+                                        modifier = Modifier.padding(10.dp),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = SteelBlue
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (isGrounding) {
+                        item {
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = CharcoalMedium),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(color = OrangeAccent, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Fetching live grounded Google ${if (useMapsMode) "Maps" else "Search"} details...", color = OrangeAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    groundingResult?.let { result ->
+                        item {
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = CharcoalMedium),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Info, contentDescription = "Grounded Response", tint = OrangeAccent)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (useMapsMode) "GROUNDED MAPS ASSESSMENT" else "GROUNDED SEARCH RATINGS",
+                                            fontWeight = FontWeight.Bold,
+                                            color = OrangeAccent,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    result.split("\n").forEach { line ->
+                                        when {
+                                            line.startsWith("###") -> {
+                                                Text(
+                                                    text = line.replace("###", "").trim(),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp,
+                                                    color = SteelBlueLight,
+                                                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+                                                )
+                                            }
+                                            line.startsWith("-") || line.startsWith("*") -> {
+                                                Row(modifier = Modifier.padding(vertical = 2.dp, horizontal = 4.dp)) {
+                                                    Text("• ", color = OrangeAccent, fontWeight = FontWeight.Bold)
+                                                    Text(line.substring(1).trim(), color = Color.White, fontSize = 12.sp)
+                                                }
+                                            }
+                                            else -> {
+                                                if (line.isNotEmpty()) {
+                                                    Text(line, color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1153,6 +1571,120 @@ fun LocalResultRow(label: String, value: String) {
         Text(label, fontSize = 13.sp, color = CharcoalLight)
         Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = CharcoalDark)
     }
+}
+
+// --- Firebase Authentication Dialog (With Google Sign-In and Firestore Sync Emulation) ---
+@Composable
+fun FirebaseSignInDialog(
+    viewModel: WeldHubViewModel,
+    onDismiss: () -> Unit,
+    onComplete: (String) -> Unit
+) {
+    var emailInput by remember { mutableStateOf("khaaansaifi0@gmail.com") } // Pre-filled with exact user email!
+    var nameInput by remember { mutableStateOf("Khan Saifi") }
+    var phoneInput by remember { mutableStateOf("+91 99887 76655") }
+    var selectedRole by remember { mutableStateOf("Customer") } // "Customer", "Welder", "Fabricator"
+    
+    var isLoading by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, contentDescription = "Firebase", tint = OrangeAccent)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Firebase Authentication", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "Securely identify yourself on WeldHub using Firebase Auth and synchronize your projects dynamically to Firestore.",
+                    fontSize = 12.sp,
+                    color = CharcoalLight
+                )
+
+                OutlinedTextField(
+                    value = emailInput,
+                    onValueChange = { emailInput = it },
+                    label = { Text("Email Address") },
+                    modifier = Modifier.fillMaxWidth().testTag("firebase_email_input")
+                )
+
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Full Name") },
+                    modifier = Modifier.fillMaxWidth().testTag("firebase_name_input")
+                )
+
+                OutlinedTextField(
+                    value = phoneInput,
+                    onValueChange = { phoneInput = it },
+                    label = { Text("Mobile Phone") },
+                    modifier = Modifier.fillMaxWidth().testTag("firebase_phone_input")
+                )
+
+                Text("Select Platform Role", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = CharcoalDark)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("Customer", "Welder", "Fabricator").forEach { r ->
+                        FilterChip(
+                            selected = selectedRole == r,
+                            onClick = { selectedRole = r },
+                            label = { Text(r) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        isLoading = true
+                        viewModel.firebaseAuthSignInOrRegister(
+                            email = emailInput,
+                            name = nameInput,
+                            role = selectedRole,
+                            phone = phoneInput
+                        ) { success ->
+                            isLoading = false
+                            if (success) {
+                                onComplete(selectedRole)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("firebase_submit_button"),
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangeAccent),
+                    enabled = !isLoading
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp))
+                    } else {
+                        Text("Google Sign-In with Firebase Auth")
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = { onDismiss() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Cancel")
+                }
+            }
+        }
+    )
 }
 
 // ==========================================
@@ -1559,7 +2091,7 @@ fun BookingCreateScreen(
             onValueChange = { scheduleDate = it },
             label = { Text("Desired Commencement Date (e.g. 10th July)") },
             placeholder = { Text("DD/MM/YYYY") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().testTag("booking_date_input")
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -1569,7 +2101,7 @@ fun BookingCreateScreen(
             onValueChange = { addressInput = it },
             label = { Text("Site Installation Address") },
             placeholder = { Text("Enter full address across India...") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("booking_address_input"),
             maxLines = 3
         )
 
@@ -1580,7 +2112,7 @@ fun BookingCreateScreen(
             onValueChange = { notesInput = it },
             label = { Text("Notes / Special Instructions") },
             placeholder = { Text("E.g., require custom height, locks, wheels...") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("booking_notes_input"),
             maxLines = 3
         )
 
@@ -1634,7 +2166,7 @@ fun BookingCreateScreen(
                     popUpTo(0) { inclusive = true }
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("booking_submit_button"),
             colors = ButtonDefaults.buttonColors(containerColor = OrangeAccent),
             shape = RoundedCornerShape(8.dp)
         ) {

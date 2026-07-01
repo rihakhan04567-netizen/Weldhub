@@ -1,0 +1,38 @@
+# Codemagic CI/CD configuration for WeldHub Native Android (Kotlin) App
+# For detailed configuration instructions, please refer to https://docs.codemagic.io/yaml/building/
+
+workflows:
+  android-build:
+    name: WeldHub Android Release Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      java: 17
+      vars:
+        PACKAGE_NAME: "com.aistudio.weldhub.kxaqsp"
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: '*'
+          include: true
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+      - name: Grant execute permission for gradlew
+        script: |
+          chmod +x gradlew
+      - name: Build Debug and Release APKs
+        script: |
+          ./gradlew assembleDebug assembleRelease
+    artifacts:
+      - app/build/outputs/apk/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - khaaansaifi0@gmail.com
+        notify:
+          on_success: true
+          on_failure: true

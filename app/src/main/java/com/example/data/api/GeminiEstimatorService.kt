@@ -162,6 +162,136 @@ object GeminiEstimatorService {
         return null
     }
 
+    suspend fun callGeminiAPIAdvanced(
+        model: String,
+        messages: List<Pair<String, String>>, // Pair of role to text
+        systemInstruction: String? = null,
+        useSearch: Boolean = false,
+        useMaps: Boolean = false,
+        thinkingLevel: String? = null
+    ): String? = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            Log.e(TAG, "Gemini API key is not configured.")
+            return@withContext null
+        }
+
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+
+        try {
+            val rootJson = JSONObject()
+
+            // Contents
+            val contentsArray = JSONArray()
+            for (msg in messages) {
+                val role = msg.first // "user" or "model"
+                val text = msg.second
+                val partObj = JSONObject().put("text", text)
+                val contentObj = JSONObject()
+                    .put("role", role)
+                    .put("parts", JSONArray().put(partObj))
+                contentsArray.put(contentObj)
+            }
+            rootJson.put("contents", contentsArray)
+
+            // System Instruction
+            if (systemInstruction != null) {
+                val sysPartObj = JSONObject().put("text", systemInstruction)
+                val sysContentObj = JSONObject().put("parts", JSONArray().put(sysPartObj))
+                rootJson.put("systemInstruction", sysContentObj)
+            }
+
+            // Generation Config
+            val genConfig = JSONObject()
+            if (thinkingLevel != null) {
+                val thinkingConfig = JSONObject().put("thinkingLevel", thinkingLevel.uppercase())
+                genConfig.put("thinkingConfig", thinkingConfig)
+            }
+            if (genConfig.length() > 0) {
+                rootJson.put("generationConfig", genConfig)
+            }
+
+            // Tools
+            if (useSearch || useMaps) {
+                val toolsArray = JSONArray()
+                if (useSearch) {
+                    val searchObj = JSONObject()
+                    searchObj.put("googleSearch", JSONObject())
+                    toolsArray.put(searchObj)
+                }
+                if (useMaps) {
+                    val mapsObj = JSONObject()
+                    mapsObj.put("googleMaps", JSONObject())
+                    toolsArray.put(mapsObj)
+                }
+                rootJson.put("tools", toolsArray)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaType()
+            val body = rootJson.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url(url)
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string()
+                    Log.e(TAG, "Advanced API call unsuccessful (${response.code}): $errorBody")
+                    return@withContext null
+                }
+                val responseStr = response.body?.string() ?: return@withContext null
+                val responseJson = JSONObject(responseStr)
+                val candidates = responseJson.optJSONArray("candidates")
+                if (candidates != null && candidates.length() > 0) {
+                    val firstCandidate = candidates.getJSONObject(0)
+                    val content = firstCandidate.optJSONObject("content")
+                    if (content != null) {
+                        val parts = content.optJSONArray("parts")
+                        if (parts != null && parts.length() > 0) {
+                            return@withContext parts.getJSONObject(0).optString("text")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Advanced API call failed", e)
+        }
+        return@withContext null
+    }
+
+    suspend fun runThinkingChat(
+        messages: List<Pair<String, String>>,
+        systemInstruction: String
+    ): String? {
+        // High reasoning tasks require gemini-3.1-pro-preview and high thinkingLevel. DO NOT set maxOutputTokens!
+        return callGeminiAPIAdvanced(
+            model = "gemini-3.1-pro-preview",
+            messages = messages,
+            systemInstruction = systemInstruction,
+            thinkingLevel = "high"
+        )
+    }
+
+    suspend fun runGroundedSearch(
+        query: String,
+        useMaps: Boolean
+    ): String? {
+        // Google Search & Maps Grounding use gemini-3.5-flash with search/maps tools
+        val prompt = if (useMaps) {
+            "You are a local business and mapping expert. For the user query: \"$query\", find relevant local steel fabricators, welding workshops, galvanizers, or raw material suppliers in India. List their typical locations, services, and approximate contact/reachability details."
+        } else {
+            "You are a real-time market search assistant. For the query: \"$query\", search for up-to-date steel fabrication costs, raw material grades, Tata steel price lists, or fabrication standards in India."
+        }
+        return callGeminiAPIAdvanced(
+            model = "gemini-3.5-flash",
+            messages = listOf("user" to prompt),
+            useSearch = !useMaps,
+            useMaps = useMaps
+        )
+    }
+
     private fun getOfflineFallbackEstimate(
         heightFt: Double,
         widthFt: Double,
